@@ -1,7 +1,105 @@
 import { uploadFile } from "./file-upload";
 import { db, type Attachment } from "../db";
-import { syncOnce } from "./sync";
-import { useEffect, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { useMemo } from "react";
+
+const API_URL = import.meta.env.VITE_API_URL;
+
+function FilePreview({ attachment }: { attachment: Attachment }) {
+    const previewUrl = useMemo(() => {
+        // If uploaded, use server URL
+        if (attachment.url) {
+            return `${API_URL}/${attachment.url}`;
+        }
+
+        // If pending with local blob, create object URL
+        if (attachment.localBlob) {
+            return URL.createObjectURL(attachment.localBlob);
+        }
+
+        return null;
+    }, [attachment.url, attachment.localBlob]);
+
+    const isImage = attachment.mimeType?.startsWith("image/");
+    const isPdf = attachment.mimeType === "application/pdf";
+    const isVideo = attachment.mimeType?.startsWith("video/");
+
+    return (
+        <div className="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-start gap-3">
+                {/* Preview Section */}
+                <div className="shrink-0">
+                    {isImage && previewUrl ? (
+                        <img
+                            src={previewUrl}
+                            alt={attachment.filename}
+                            className="w-24 h-24 object-cover rounded border"
+                        />
+                    ) : isVideo && previewUrl ? (
+                        <video
+                            src={previewUrl}
+                            className="w-24 h-24 object-cover rounded border"
+                            controls={false}
+                        />
+                    ) : isPdf ? (
+                        <div className="w-24 h-24 flex items-center justify-center bg-red-50 rounded border border-red-200">
+                            <span className="text-4xl">📄</span>
+                        </div>
+                    ) : (
+                        <div className="w-24 h-24 flex items-center justify-center bg-slate-100 rounded border">
+                            <span className="text-4xl">📎</span>
+                        </div>
+                    )}
+                </div>
+
+                {/* Info Section */}
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                        {attachment.uploadStatus === "pending" && (
+                            <span className="text-orange-600 text-xs font-medium px-2 py-0.5 bg-orange-50 rounded">
+                                ⏳ Pending sync
+                            </span>
+                        )}
+                        {attachment.uploadStatus === "uploading" && (
+                            <span className="text-blue-600 text-xs font-medium px-2 py-0.5 bg-blue-50 rounded">
+                                ⬆️ Uploading...
+                            </span>
+                        )}
+                        {attachment.uploadStatus === "uploaded" && (
+                            <span className="text-green-600 text-xs font-medium px-2 py-0.5 bg-green-50 rounded">
+                                ✅ Synced
+                            </span>
+                        )}
+                        {attachment.uploadStatus === "failed" && (
+                            <span className="text-red-600 text-xs font-medium px-2 py-0.5 bg-red-50 rounded">
+                                ❌ Failed
+                            </span>
+                        )}
+                    </div>
+
+                    {previewUrl ? (
+                        <a
+                            href={previewUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline font-medium block truncate"
+                        >
+                            {attachment.filename}
+                        </a>
+                    ) : (
+                        <span className="text-slate-700 font-medium block truncate">
+                            {attachment.filename}
+                        </span>
+                    )}
+
+                    <div className="text-xs text-slate-500 mt-1">
+                        {attachment.mimeType} • {(attachment.size / 1024).toFixed(1)} KB
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 function FileUploadComponent({ friendId }: { friendId: string }) {
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -10,13 +108,9 @@ function FileUploadComponent({ friendId }: { friendId: string }) {
 
         try {
             const attachmentId = await uploadFile(file, friendId);
-            console.log("File uploaded:", attachmentId);
-
-            // Sync to propagate metadata
-            await syncOnce();
-
+            console.log("File stored locally:", attachmentId);
         } catch (err) {
-            console.error("Upload failed:", err);
+            console.error("Failed to store file:", err);
         }
     };
 
@@ -27,33 +121,27 @@ function FileUploadComponent({ friendId }: { friendId: string }) {
     );
 }
 
-// Display attachments
-function AttachmentsList({ friendId }: { friendId: string }) {
-    const [attachments, setAttachments] = useState<Attachment[]>([]);
-
-    useEffect(() => {
-        db.attachments
-            .where("friendId")
-            .equals(friendId)
-            .toArray()
-            .then(setAttachments);
-    }, [friendId]);
+function UploadedFilesList() {
+    const attachments = useLiveQuery(async () => {
+        const items = await db.attachments.toArray();
+        return items.sort((a, b) => b.updatedAt - a.updatedAt);
+    }, []);
 
     return (
-        <ul>
-            {attachments.map((att) => (
-                <li key={att.id}>
-                    {att.uploadStatus === "uploaded" && att.url ? (
-                        <a href={att.url} target="_blank" rel="noopener noreferrer">
-                            {att.filename}
-                        </a>
-                    ) : (
-                        <span>{att.filename} ({att.uploadStatus})</span>
-                    )}
-                </li>
-            ))}
-        </ul>
+        <div>
+            <h2 className="text-xl font-semibold mb-3">Files</h2>
+
+            {!attachments || attachments.length === 0 ? (
+                <p className="text-slate-500">No files yet.</p>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {attachments.map((att) => (
+                        <FilePreview key={att.id} attachment={att} />
+                    ))}
+                </div>
+            )}
+        </div>
     );
 }
 
-export { FileUploadComponent, AttachmentsList };
+export { FileUploadComponent, UploadedFilesList };

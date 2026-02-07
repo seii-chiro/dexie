@@ -152,8 +152,9 @@ db.attachments.hook("creating", function (primKey, obj) {
   (obj as Attachment).updatedAt = now;
   (obj as Attachment).deletedAt = undefined;
 
-  // Don't include localPath in sync payload (it's only for local use)
-  const { localPath, ...syncData } = obj as Attachment;
+  // Don't include localBlob in sync payload (it's only for local storage)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { localBlob: _localBlob, ...syncData } = obj as Attachment;
 
   const item = {
     changeId: uuid(),
@@ -195,8 +196,9 @@ db.attachments.hook(
     const next = { ...obj, ...mods, updatedAt: now };
     mods.updatedAt = now;
 
-    // Don't include localPath in sync payload
-    const { localPath, ...syncData } = next;
+    // Don't include localBlob in sync payload
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { localBlob: _localBlob, ...syncData } = next;
 
     const item = {
       changeId: uuid(),

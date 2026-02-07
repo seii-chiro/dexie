@@ -1,5 +1,6 @@
 import { db, type Friend, type Attachment } from "../db";
 import { setSyncing } from "./outbox-logger";
+import { uploadPendingFiles } from "./file-upload";
 
 const API = import.meta.env.VITE_API_URL;
 
@@ -28,13 +29,22 @@ async function pullChanges(limit = 500) {
   const res = await fetch(`${API}/sync/pull`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    // use lastSeq from state so we don't pull everything every time
     body: JSON.stringify({ sinceSeq: state.lastSeq, limit }),
   });
 
   if (!res.ok) throw new Error(`pull failed: ${res.status}`);
   const data = await res.json();
 
+  console.debug(
+    "[sync] pull received",
+    data.changes?.length,
+    "changes",
+    "newSeq=",
+    data.newSeq,
+  );
   setSyncing(true);
+
   try {
     await db.transaction(
       "rw",
@@ -42,44 +52,65 @@ async function pullChanges(limit = 500) {
       db.attachments,
       db.syncState,
       async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const ch of data.changes as any[]) {
-          if (ch.table === "friends") {
-            if (ch.op === "upsert") {
-              const friend: Friend = {
-                id: ch.data.id,
-                name: ch.data.name,
-                age: ch.data.age,
-                updatedAt: ch.data.updatedAt,
-                deletedAt: ch.data.deletedAt,
-              };
-              await db.friends.put(friend);
-            } else if (ch.op === "delete") {
-              await db.friends.delete(ch.pk);
+        for (const ch of data.changes) {
+          try {
+            console.debug(
+              "[sync] applying change",
+              ch.table,
+              ch.op,
+              ch.pk ?? ch.data?.id,
+            );
+            if (ch.table === "friends") {
+              if (ch.op === "upsert") {
+                const friend: Friend = {
+                  id: ch.data.id,
+                  name: ch.data.name,
+                  age: ch.data.age,
+                  updatedAt: ch.data.updatedAt,
+                  deletedAt: ch.data.deletedAt,
+                };
+                await db.friends.put(friend);
+                console.debug("[sync] friend upsert applied", friend.id);
+              } else if (ch.op === "delete") {
+                await db.friends.delete(String(ch.pk));
+                console.debug("[sync] friend delete applied", ch.pk);
+              }
+            } else if (ch.table === "attachments") {
+              if (ch.op === "upsert") {
+                const attachment: Attachment = {
+                  id: ch.data.id,
+                  filename: ch.data.filename,
+                  mimeType: ch.data.mimeType,
+                  size: ch.data.size,
+                  url: ch.data.url,
+                  uploadStatus: ch.data.uploadStatus || "uploaded",
+                  friendId: ch.data.friendId,
+                  updatedAt: ch.data.updatedAt,
+                  deletedAt: ch.data.deletedAt,
+                };
+                await db.attachments.put(attachment);
+                console.debug(
+                  "[sync] attachment upsert applied",
+                  attachment.id,
+                );
+              } else if (ch.op === "delete") {
+                await db.attachments.delete(String(ch.pk));
+                console.debug("[sync] attachment delete applied", ch.pk);
+              }
             }
-          } else if (ch.table === "attachments") {
-            if (ch.op === "upsert") {
-              const attachment: Attachment = {
-                id: ch.data.id,
-                filename: ch.data.filename,
-                mimeType: ch.data.mimeType,
-                size: ch.data.size,
-                url: ch.data.url,
-                uploadStatus: ch.data.uploadStatus || "uploaded",
-                friendId: ch.data.friendId,
-                updatedAt: ch.data.updatedAt,
-                deletedAt: ch.data.deletedAt,
-              };
-              await db.attachments.put(attachment);
-            } else if (ch.op === "delete") {
-              await db.attachments.delete(ch.pk);
-            }
+          } catch (err) {
+            console.error("[sync] failed applying change", ch, err);
+            throw err; // abort transaction so the failure is visible
           }
         }
 
         await db.syncState.put({ key: "friends", lastSeq: data.newSeq });
+        console.debug("[sync] transaction committed, newSeq:", data.newSeq);
       },
     );
+  } catch (err) {
+    console.error("[sync] transaction failed:", err);
+    throw err;
   } finally {
     setSyncing(false);
   }
@@ -88,6 +119,9 @@ async function pullChanges(limit = 500) {
 }
 
 export async function syncOnce() {
+  // Upload any pending files first
+  await uploadPendingFiles();
+  
   // Push until outbox drained
   while ((await db.outbox.count()) > 0) {
     await pushChanges(100);

@@ -2,64 +2,79 @@ import { db } from "../db";
 
 const API = import.meta.env.VITE_API_URL;
 
+// Store file locally in IndexedDB (offline-first)
 export async function uploadFile(
   file: File,
   friendId?: string,
 ): Promise<string> {
   const attachmentId = crypto.randomUUID();
 
-  // 1. Save metadata to IndexedDB immediately
+  // Save file and metadata to IndexedDB only
   await db.attachments.add({
     id: attachmentId,
     filename: file.name,
     mimeType: file.type,
     size: file.size,
+    localBlob: file, // Store the actual file
     uploadStatus: "pending",
     friendId,
     updatedAt: Date.now(),
   });
 
-  console.log("📎 [upload] Created attachment metadata:", attachmentId);
+  console.log("📎 [upload] File stored locally:", attachmentId);
+  return attachmentId;
+}
 
-  // 2. Upload file to server
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("id", attachmentId);
-  formData.append("filename", file.name);
-  formData.append("mimeType", file.type);
-  if (friendId) {
-    formData.append("friendId", friendId);
-  }
+// Upload pending files to server (called during sync)
+export async function uploadPendingFiles() {
+  const pending = await db.attachments
+    .where("uploadStatus")
+    .equals("pending")
+    .toArray();
 
-  try {
-    // Update status to uploading
-    await db.attachments.update(attachmentId, { uploadStatus: "uploading" });
-    console.log("📤 [upload] Uploading to server...");
+  console.log(`📤 [upload] Found ${pending.length} pending files to upload`);
 
-    const res = await fetch(`${API}/sync/upload`, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!res.ok) {
-      throw new Error(`Upload failed: ${res.status}`);
+  for (const attachment of pending) {
+    if (!attachment.localBlob) {
+      console.warn("⚠️ [upload] No local blob for", attachment.id);
+      continue;
     }
 
-    const data = await res.json();
-    console.log("✅ [upload] Upload successful:", data);
+    try {
+      await db.attachments.update(attachment.id, { uploadStatus: "uploading" });
 
-    // Update with server URL
-    await db.attachments.update(attachmentId, {
-      url: data.url,
-      uploadStatus: "uploaded",
-      updatedAt: Date.now(),
-    });
+      const formData = new FormData();
+      formData.append("file", attachment.localBlob, attachment.filename);
+      formData.append("id", attachment.id);
+      formData.append("filename", attachment.filename);
+      formData.append("mimeType", attachment.mimeType);
+      if (attachment.friendId) {
+        formData.append("friendId", attachment.friendId);
+      }
 
-    return attachmentId;
-  } catch (err) {
-    console.error("❌ [upload] Upload failed:", err);
-    await db.attachments.update(attachmentId, { uploadStatus: "failed" });
-    throw err;
+      const res = await fetch(`${API}/sync/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error(`Upload failed: ${res.status}`);
+      }
+
+      const data = await res.json();
+      console.log("✅ [upload] Upload successful:", attachment.filename);
+
+      // Update with server URL and remove local blob
+      await db.attachments.update(attachment.id, {
+        url: data.url,
+        uploadStatus: "uploaded",
+        localBlob: undefined, // Clear local blob after successful upload
+        updatedAt: Date.now(),
+      });
+    } catch (err) {
+      console.error("❌ [upload] Upload failed:", attachment.filename, err);
+      await db.attachments.update(attachment.id, { uploadStatus: "failed" });
+    }
   }
 }
 

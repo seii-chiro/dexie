@@ -15,7 +15,7 @@ export interface Attachment {
   mimeType: string;
   size: number;
   url?: string; // Server URL after upload
-  localPath?: string; // For accessing local blob
+  localBlob?: Blob; // Store the actual file locally
   uploadStatus: "pending" | "uploading" | "uploaded" | "failed";
   friendId?: string; // Optional: link to a friend
   updatedAt: number;
@@ -26,8 +26,8 @@ export type OutboxOp = "upsert" | "delete";
 
 export interface OutboxItem {
   changeId: string; // unique id for this change (uuid)
-  table: "friends";
-  primary_key: string; // Friend.id
+  table: "friends" | "attachments";
+  primary_key: string; // Friend.id or Attachment.id
   op: OutboxOp;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload?: any; // the row snapshot (or patch)
