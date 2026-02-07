@@ -12,6 +12,7 @@ export interface Friend {
   id: string;
   name: string;
   age: number;
+  record_tags: string[];
   updatedAt?: number;
   deletedAt?: number | null;
 }
@@ -24,7 +25,8 @@ export interface Attachment {
   url?: string; // Server URL after upload
   localBlob?: Blob; // Store the actual file locally
   uploadStatus: "pending" | "uploading" | "uploaded" | "failed";
-  friendId?: string; // Optional: link to a friend
+  record_tags: string[];
+  friendId?: string;
   updatedAt: number;
   deletedAt?: number | null;
 }
@@ -33,7 +35,7 @@ export type OutboxOp = "upsert" | "delete";
 
 export interface OutboxItem {
   changeId: string; // unique id for this change (uuid)
-  table: "friends" | "attachments";
+  table: "friends" | "attachments" | "record_tags";
   primary_key: string; // Friend.id or Attachment.id
   op: OutboxOp;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,6 +53,7 @@ export interface SyncState {
 const db = new Dexie("FriendsDatabase") as Dexie & {
   friends: EntityTable<Friend, "id">; // primary key "id" (for the typings only)
   attachments: EntityTable<Attachment, "id">;
+  recordTags: EntityTable<RecordTag, "id">;
   outbox: EntityTable<OutboxItem, "changeId">;
   syncState: EntityTable<SyncState, "key">;
 };
@@ -59,6 +62,14 @@ const db = new Dexie("FriendsDatabase") as Dexie & {
 db.version(1).stores({
   friends: "id, name, age, updatedAt",
   attachments: "id, filename, mimeType, uploadStatus, updatedAt, friendId",
+  outbox: "changeId, table, primary_key, op, ts, attempts",
+  syncState: "key",
+});
+
+db.version(2).stores({
+  friends: "id, name, age, updatedAt",
+  attachments: "id, filename, mimeType, uploadStatus, updatedAt, friendId",
+  recordTags: "id, tag_name, updatedAt",
   outbox: "changeId, table, primary_key, op, ts, attempts",
   syncState: "key",
 });

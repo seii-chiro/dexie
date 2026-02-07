@@ -1,4 +1,9 @@
-import { db, type Friend, type Attachment } from "../db";
+import {
+  db,
+  type Friend,
+  type Attachment,
+  type RecordTag,
+} from "../db";
 import { setSyncing } from "./outbox-logger";
 import { uploadPendingFiles } from "./file-upload";
 
@@ -50,6 +55,7 @@ async function pullChanges(limit = 500) {
       "rw",
       db.friends,
       db.attachments,
+      db.recordTags,
       db.syncState,
       async () => {
         for (const ch of data.changes) {
@@ -66,6 +72,7 @@ async function pullChanges(limit = 500) {
                   id: ch.data.id,
                   name: ch.data.name,
                   age: ch.data.age,
+                  record_tags: ch.data.record_tags ?? [],
                   updatedAt: ch.data.updatedAt,
                   deletedAt: ch.data.deletedAt,
                 };
@@ -79,6 +86,7 @@ async function pullChanges(limit = 500) {
               if (ch.op === "upsert") {
                 const attachment: Attachment = {
                   id: ch.data.id,
+                  record_tags: ch.data.record_tags ?? [],
                   filename: ch.data.filename,
                   mimeType: ch.data.mimeType,
                   size: ch.data.size,
@@ -96,6 +104,20 @@ async function pullChanges(limit = 500) {
               } else if (ch.op === "delete") {
                 await db.attachments.delete(String(ch.pk));
                 console.debug("[sync] attachment delete applied", ch.pk);
+              }
+            } else if (ch.table === "record_tags") {
+              if (ch.op === "upsert") {
+                const recordTag: RecordTag = {
+                  id: ch.data.id,
+                  tag_name: ch.data.tag_name,
+                  updatedAt: ch.data.updatedAt,
+                  deletedAt: ch.data.deletedAt,
+                };
+                await db.recordTags.put(recordTag);
+                console.debug("[sync] record tag upsert applied", recordTag.id);
+              } else if (ch.op === "delete") {
+                await db.recordTags.delete(String(ch.pk));
+                console.debug("[sync] record tag delete applied", ch.pk);
               }
             }
           } catch (err) {

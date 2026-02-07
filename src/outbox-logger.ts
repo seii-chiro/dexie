@@ -1,4 +1,9 @@
-import { db, type Friend, type Attachment } from "../db";
+import {
+  db,
+  type Friend,
+  type Attachment,
+  type RecordTag,
+} from "../db";
 
 console.debug("[outbox-logger] loaded and registering hooks");
 console.log("🔴 [outbox-logger] MODULE LOADED - this should print immediately");
@@ -20,6 +25,7 @@ db.friends.hook("creating", function (primKey, obj) {
 
   const now = Date.now();
   // Ensure sync fields exist
+  (obj as Friend).record_tags = (obj as Friend).record_tags ?? [];
   (obj as Friend).updatedAt = now;
   (obj as Friend).deletedAt = undefined;
 
@@ -63,9 +69,11 @@ db.friends.hook("updating", function (mods: Partial<Friend>, primKey, obj) {
   const now = Date.now();
 
   // Build the post-update snapshot (simple approach)
-  const next = { ...obj, ...mods, updatedAt: now };
+  const recordTags = mods.record_tags ?? obj.record_tags ?? [];
+  const next = { ...obj, ...mods, updatedAt: now, record_tags: recordTags };
 
   // Ensure the write itself updates updatedAt
+  mods.record_tags = recordTags;
   mods.updatedAt = now;
 
   const item = {
@@ -149,6 +157,7 @@ db.attachments.hook("creating", function (primKey, obj) {
   }
 
   const now = Date.now();
+  (obj as Attachment).record_tags = (obj as Attachment).record_tags ?? [];
   (obj as Attachment).updatedAt = now;
   (obj as Attachment).deletedAt = undefined;
 
@@ -193,7 +202,14 @@ db.attachments.hook(
     }
 
     const now = Date.now();
-    const next = { ...obj, ...mods, updatedAt: now };
+    const recordTags = mods.record_tags ?? obj.record_tags ?? [];
+    const next = {
+      ...obj,
+      ...mods,
+      updatedAt: now,
+      record_tags: recordTags,
+    };
+    mods.record_tags = recordTags;
     mods.updatedAt = now;
 
     // Don't include localBlob in sync payload
@@ -259,6 +275,111 @@ db.attachments.hook("deleting", function (primKey) {
       )
       .catch((err) =>
         console.error("[outbox] failed to queue (attachments deleting)", err),
+      );
+  }, 0);
+});
+
+db.recordTags.hook("creating", function (primKey, obj) {
+  console.debug("[outbox] recordTags creating hook fired, syncing =", syncing);
+  if (syncing) return;
+
+  const now = Date.now();
+  (obj as RecordTag).updatedAt = now;
+  (obj as RecordTag).deletedAt = undefined;
+
+  const item = {
+    changeId: uuid(),
+    table: "record_tags" as const,
+    primary_key: String(primKey ?? obj.id),
+    op: "upsert" as const,
+    payload: { ...obj, updatedAt: now, deletedAt: null },
+    ts: now,
+    attempts: 0,
+  };
+
+  setTimeout(() => {
+    void db.outbox
+      .add(item)
+      .then(() =>
+        console.debug(
+          "[outbox] queued (recordTags creating)",
+          item.changeId,
+          item.op,
+          item.primary_key,
+        ),
+      )
+      .catch((err) =>
+        console.error("[outbox] failed to queue (recordTags creating)", err),
+      );
+  }, 0);
+});
+
+db.recordTags.hook(
+  "updating",
+  function (mods: Partial<RecordTag>, primKey, obj) {
+    console.debug("[outbox] recordTags updating hook fired, syncing =", syncing);
+    if (syncing) return;
+
+    const now = Date.now();
+    const next = { ...obj, ...mods, updatedAt: now };
+    mods.updatedAt = now;
+
+    const item = {
+      changeId: uuid(),
+      table: "record_tags" as const,
+      primary_key: String(primKey),
+      op: "upsert" as const,
+      payload: next,
+      ts: now,
+      attempts: 0,
+    };
+
+    setTimeout(() => {
+      void db.outbox
+        .add(item)
+        .then(() =>
+          console.debug(
+            "[outbox] queued (recordTags updating)",
+            item.changeId,
+            item.op,
+            item.primary_key,
+          ),
+        )
+        .catch((err) =>
+          console.error("[outbox] failed to queue (recordTags updating)", err),
+        );
+    }, 0);
+  },
+);
+
+db.recordTags.hook("deleting", function (primKey) {
+  console.debug("[outbox] recordTags deleting hook fired, syncing =", syncing);
+  if (syncing) return;
+
+  const now = Date.now();
+
+  const item = {
+    changeId: uuid(),
+    table: "record_tags" as const,
+    primary_key: String(primKey),
+    op: "delete" as const,
+    ts: now,
+    attempts: 0,
+  };
+
+  setTimeout(() => {
+    void db.outbox
+      .add(item)
+      .then(() =>
+        console.debug(
+          "[outbox] queued (recordTags deleting)",
+          item.changeId,
+          item.op,
+          item.primary_key,
+        ),
+      )
+      .catch((err) =>
+        console.error("[outbox] failed to queue (recordTags deleting)", err),
       );
   }, 0);
 });

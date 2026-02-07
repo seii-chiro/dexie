@@ -1,16 +1,45 @@
 import { useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
+
+function parseCustomTags(raw: string): string[] {
+    return raw
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+}
+
+function buildFriendTags(selectedTags: string[], customTags: string): string[] {
+    return Array.from(new Set([...selectedTags, ...parseCustomTags(customTags)]))
+}
 
 const AddFriendForm = ({ defaultAge } = { defaultAge: 21 }) => {
     const [name, setName] = useState("")
     const [age, setAge] = useState(defaultAge)
+    const [selectedTags, setSelectedTags] = useState<string[]>([])
+    const [customTags, setCustomTags] = useState("")
     const [status, setStatus] = useState("")
+    const availableTags = useLiveQuery(async () => {
+        const items = await db.recordTags.toArray()
+        return items.map((item) => item.tag_name).sort((a, b) => a.localeCompare(b))
+    }, [])
+
+    function toggleTag(tag: string) {
+        setSelectedTags((prev) =>
+            prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+        )
+    }
 
     async function addFriend() {
         try {
             // Add the new friend!
             const id = crypto.randomUUID()
-            await db.friends.add({ id, name, age })
+            await db.friends.add({
+                id,
+                name,
+                age,
+                record_tags: buildFriendTags(selectedTags, customTags),
+            })
 
             // Debug: log outbox count after creating a friend
             const outboxCount = await db.outbox.count()
@@ -19,6 +48,8 @@ const AddFriendForm = ({ defaultAge } = { defaultAge: 21 }) => {
             setStatus(`Friend ${name} successfully added. Got id ${id}`)
             setName("")
             setAge(defaultAge)
+            setSelectedTags([])
+            setCustomTags("")
         } catch (error) {
             setStatus(`Failed to add ${name}: ${error}`)
         }
@@ -50,6 +81,32 @@ const AddFriendForm = ({ defaultAge } = { defaultAge: 21 }) => {
                         onChange={(ev) => setAge(Number(ev.target.value))}
                     />
                 </label>
+
+                <div className="flex flex-col gap-2">
+                    <span className="text-sm font-medium">Record tags</span>
+                    <div className="flex flex-wrap gap-3">
+                        {(availableTags ?? []).map((tag) => (
+                            <label key={tag} className="inline-flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={selectedTags.includes(tag)}
+                                    onChange={() => toggleTag(tag)}
+                                />
+                                <span>{tag}</span>
+                            </label>
+                        ))}
+                    </div>
+                    {availableTags && availableTags.length === 0 && (
+                        <p className="text-xs text-slate-500">No tags in RecordTags table yet. Add some in Record Tags manager.</p>
+                    )}
+                    <input
+                        className="mt-1 px-3 py-2 border rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        type="text"
+                        value={customTags}
+                        placeholder="Custom tags (comma separated)"
+                        onChange={(ev) => setCustomTags(ev.target.value)}
+                    />
+                </div>
 
                 <div>
                     <button

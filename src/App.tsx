@@ -2,6 +2,7 @@ import AddFriendForm from './AddFriendForm'
 import './App.css'
 import { FileUploadComponent, UploadedFilesList } from './FileUploadComponent'
 import FriendList from './FriendList'
+import RecordTagsManager from './RecordTagsManager'
 import SyncButton from './SyncButton'
 
 function App() {
@@ -14,6 +15,10 @@ function App() {
           <h1 className="text-3xl font-bold">My simple Dexie app</h1>
           <SyncButton />
         </div>
+
+        <section className="bg-white rounded-lg shadow p-4 mb-4">
+          <RecordTagsManager />
+        </section>
 
         <section className="bg-white rounded-lg shadow p-4 mb-4">
           <h2 className="text-xl font-semibold mb-2">Add Friend</h2>

@@ -2,16 +2,26 @@ import { db } from "../db";
 
 const API = import.meta.env.VITE_API_URL;
 
+function normalizeAttachmentTags(recordTags?: string[]): string[] {
+  const tags = (recordTags ?? [])
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+
+  return Array.from(new Set(tags));
+}
+
 // Store file locally in IndexedDB (offline-first)
 export async function uploadFile(
   file: File,
   friendId?: string,
+  recordTags?: string[],
 ): Promise<string> {
   const attachmentId = crypto.randomUUID();
 
   // Save file and metadata to IndexedDB only
   await db.attachments.add({
     id: attachmentId,
+    record_tags: normalizeAttachmentTags(recordTags),
     filename: file.name,
     mimeType: file.type,
     size: file.size,
