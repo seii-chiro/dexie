@@ -1,6 +1,13 @@
 // db.ts
 import { Dexie, type EntityTable } from "dexie";
 
+export interface RecordTag {
+  id: string;
+  tag_name: string;
+  updatedAt?: number;
+  deletedAt?: number | null;
+}
+
 export interface Friend {
   id: string;
   name: string;
